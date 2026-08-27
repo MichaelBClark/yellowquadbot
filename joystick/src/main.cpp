@@ -1,8 +1,9 @@
 // yellowquadbot joystick firmware — Seeed XIAO ESP32C6
 //
-// Reads two analog sticks + buttons, sends a JoyPacket to the robot over
-// ESP-NOW at ~50Hz. Prints its own MAC on boot in case you want to swap
-// which board is "joystick" vs "robot" for bring-up/testing.
+// Reads a 4-switch arcade joystick (up/down/left/right) plus turn/deadman/
+// gait buttons, and sends a JoyPacket to the robot over ESP-NOW at ~50Hz.
+// All inputs are digital (active-low, internal pullups) — no analog sticks.
+// Prints its own MAC on boot for bring-up/testing.
 
 #include <Arduino.h>
 #include <esp_now.h>
@@ -14,15 +15,7 @@
 esp_now_peer_info_t peerInfo;
 uint8_t seq = 0;
 
-int8_t readAxis(int pin, bool invert) {
-  int raw = analogRead(pin);
-  int centered = raw - ADC_CENTER; // -2048..2047
-  float pct = (float)centered / (float)ADC_CENTER * 100.0f;
-  if (invert) pct = -pct;
-  if (pct > 100.0f) pct = 100.0f;
-  if (pct < -100.0f) pct = -100.0f;
-  return (int8_t)pct;
-}
+inline bool pressed(int pin) { return digitalRead(pin) == LOW; }
 
 void onDataSent(const uint8_t *mac, esp_now_send_status_t status) {
   // Optional: blink an LED or log on failure. Kept quiet to avoid serial spam.
@@ -32,8 +25,9 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
-  pinMode(PIN_DEADMAN, INPUT_PULLUP);
-  pinMode(PIN_GAIT_TOGGLE, INPUT_PULLUP);
+  const int inputPins[] = {PIN_STICK_UP, PIN_STICK_DOWN, PIN_STICK_LEFT, PIN_STICK_RIGHT,
+                            PIN_DEADMAN, PIN_TURN_LEFT, PIN_TURN_RIGHT, PIN_GAIT_TOGGLE};
+  for (int pin : inputPins) pinMode(pin, INPUT_PULLUP);
 
   WiFi.mode(WIFI_STA);
   Serial.print("Joystick MAC address: ");
@@ -54,17 +48,29 @@ void setup() {
   }
 }
 
+// Simple debounce for the gait-toggle button: only latch a press once per
+// physical push, so holding it doesn't spam mode changes.
+bool gaitButtonWasDown = false;
+uint8_t gaitToggleEdge = 0;
+
 void loop() {
   JoyPacket pkt;
   pkt.seq = seq++;
-  pkt.lx = readAxis(PIN_LEFT_X, false);
-  pkt.ly = readAxis(PIN_LEFT_Y, true); // stick "up" -> positive forward
-  pkt.rx = readAxis(PIN_RIGHT_X, false);
-  pkt.ry = readAxis(PIN_RIGHT_Y, true);
+
+  // Digital directions collapse to -100/0/100, same range the controller's
+  // deadzone/stride math already expects from an analog stick.
+  pkt.ly = pressed(PIN_STICK_UP) ? 100 : (pressed(PIN_STICK_DOWN) ? -100 : 0);
+  pkt.lx = pressed(PIN_STICK_RIGHT) ? 100 : (pressed(PIN_STICK_LEFT) ? -100 : 0);
+  pkt.rx = pressed(PIN_TURN_RIGHT) ? 100 : (pressed(PIN_TURN_LEFT) ? -100 : 0);
+  pkt.ry = 0; // no body-height input on this build
+
+  bool gaitButtonDown = pressed(PIN_GAIT_TOGGLE);
+  gaitToggleEdge = (gaitButtonDown && !gaitButtonWasDown) ? 1 : 0;
+  gaitButtonWasDown = gaitButtonDown;
 
   pkt.buttons = 0;
-  if (digitalRead(PIN_DEADMAN) == LOW) pkt.buttons |= 0x01;   // held = armed
-  if (digitalRead(PIN_GAIT_TOGGLE) == LOW) pkt.buttons |= 0x02;
+  if (pressed(PIN_DEADMAN)) pkt.buttons |= 0x01;
+  if (gaitToggleEdge) pkt.buttons |= 0x02;
 
   esp_now_send(ROBOT_MAC, (uint8_t *)&pkt, sizeof(pkt));
 
