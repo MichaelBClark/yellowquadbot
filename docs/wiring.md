@@ -32,37 +32,46 @@ servo's datasheet; budget ~1A per small hobby servo under load).
 
 ## Joystick (XIAO ESP32C6)
 
-Built around an arcade-style joystick — 4 momentary switches inside (up,
-down, left, right; pushing the stick in a direction closes that switch) —
-plus standalone arcade pushbuttons. Everything here is a digital input, no
-ADC involved: each switch/button wires one leg to a GPIO and the other leg
-to GND, using the ESP32's internal pullup (no external resistors needed).
+Built around two proportional RC-gimbal joysticks salvaged from an old RC
+unit, each a pair of potentiometers (one per axis) — no protocol, just a
+voltage that varies with stick position. Plus two arcade pushbuttons
+(deadman, gait toggle).
+
+**Finding each pot's 3 pins** (no datasheet, unbranded stick): with a
+multimeter in resistance mode, probe pairs of pins while moving one axis.
+The two pins whose resistance sweeps smoothly through its full range
+(typically 5-10kΩ) are that axis's **outer legs**; the third pin — whose
+resistance to either outer leg changes as the stick moves — is the
+**wiper** (signal). Repeat for the other axis. Many gimbals share the
+outer-leg rails between both axes, so you may only need to wire
+power/ground once per stick (4 wires total: GND, +3.3V, wiper-X, wiper-Y)
+rather than 6.
 
 | Signal                    | XIAO C6 pin |
 |---------------------------|-------------|
-| Joystick: up (forward)    | GPIO0       |
-| Joystick: down (backward) | GPIO1       |
-| Joystick: left (strafe)   | GPIO2       |
-| Joystick: right (strafe)  | GPIO3       |
+| Left stick X (strafe)     | A0 (GPIO0)  |
+| Left stick Y (fwd/back)   | A1 (GPIO1)  |
+| Right stick X (turn)      | A2 (GPIO2)  |
+| Right stick Y (body height) | A3 (GPIO3) |
 | Deadman/enable button     | GPIO4 (hold to arm) |
-| Turn-left button          | GPIO5       |
-| Turn-right button         | GPIO6       |
-| Gait-mode toggle button   | GPIO7 (tap to cycle) |
+| Gait-mode toggle button   | GPIO5 (tap to cycle) |
 
-Wire each switch/button between its GPIO and GND — nothing else needed. If
-your joystick harness brings all 4 direction switches out to a single
-5-pin connector (common ground + 4 signal wires), that common wire goes to
-GND and the 4 signal wires go to GPIO0-3 in any order — just match up
-`joystick_config.h` (`PIN_STICK_UP/DOWN/LEFT/RIGHT`) to however you wired
-it, rather than rewiring to match the table.
+Wiring per axis: outer legs to **3.3V and GND — not 5V**, the C6's ADC
+pins aren't 5V-tolerant. It doesn't matter which outer leg goes to which
+rail; if an axis reads backwards in software, flip its `INVERT_*` constant
+in `joystick_config.h` rather than re-wiring. Wiper → the ADC pin listed
+above.
 
-Diagonal movement (e.g. forward + strafe-left) works automatically since
-up/down and left/right are read as independent switches — pushing the
-stick to a corner closes two switches at once. There's no turn input on
-the joystick itself, so turning in place uses the two dedicated buttons.
+Unbranded RC-surplus pots are rarely mechanically centered, so the
+firmware measures each axis's rest voltage at boot (`measureCenter()` in
+`main.cpp`) instead of assuming the ADC midpoint — **don't touch the
+sticks while the board is booting**, or that calibration will be off. If a
+stick still feels off-center after that, check `Serial.printf` output at
+boot (prints the measured center for each axis) to sanity-check the pots
+are wired to the ADC pins you expect.
 
 See `joystick/include/joystick_config.h` to change any of these pin
-assignments, or to add more buttons/switches (e.g. a second gait mode, a
-sit/stand toggle) — extend `JoyPacket::buttons` in
-`comms_protocol.h` (bits 3-7 are currently unused) and wire the new input
-the same way.
+assignments. Only 4 ADC1-capable pins are broken out on the XIAO C6 board
+(A0-A3), so both sticks' 4 axes use all of them — there's no ADC pin left
+for a third stick without moving the deadman/gait buttons off of digital
+GPIOs they already use (they don't need ADC pins, any GPIO works).

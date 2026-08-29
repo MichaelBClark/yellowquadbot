@@ -13,8 +13,8 @@ A 4-legged (quadruped) walking robot, 3 servos per leg (coxa / femur / tibia
 
 **Joystick**
 - Seeed Studio XIAO ESP32C6
-- 1x arcade joystick (4 internal momentary switches: up/down/left/right) — drives forward/back/strafe
-- Arcade pushbuttons: deadman/arm (hold), turn-left, turn-right, gait-mode toggle
+- 2x proportional (potentiometer) RC-gimbal joysticks — left = move, right = turn/body height
+- 2 pushbuttons: deadman/arm (hold), gait-mode toggle (tap)
 - Optional: small LiPo + charge circuit for a handheld build
 
 **Link:** ESP-NOW (WiFi peer-to-peer, no router/pairing needed, low latency).
