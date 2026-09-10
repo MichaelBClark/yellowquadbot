@@ -10,9 +10,11 @@ code elsewhere in this repo — just sharing the repo for convenience.
   QSPI, 412x412, CST816-family touch — touch isn't used here)
 - HC-SR04 ultrasonic distance sensor
 - 1x hobby servo (SG90 or similar) to sweep the sensor
-- External 5V supply for the servo if the board's 5V/USB rail can't supply
-  its stall current alongside everything else (a single SG90 is usually
-  fine off USB, but check if you upgrade to a bigger servo)
+- PCA9685 16-channel I2C PWM/servo driver (the servo is driven through
+  this rather than a direct GPIO, sharing the same part used in the
+  yellowquadbot leg controller elsewhere in this repo)
+- External 5V supply for the servo, wired to the PCA9685's V+ rail — don't
+  power it from the ESP32-S3 board's 5V/USB pin
 
 ## Before you flash anything
 
@@ -23,15 +25,17 @@ their wiki — look for a `pin_config.h` or similar in the demo bundle) and
 copy them in. Getting these wrong won't just fail to work, it can drive
 pins in ways the AMOLED module doesn't expect.
 
-The servo and ultrasonic pins are also `-1` placeholders — those you *do*
+The ultrasonic sensor's pins are also `-1` placeholders — those you *do*
 choose yourself, from whichever GPIOs the board's expansion header breaks
 out that aren't already claimed by the display/touch/IMU/RTC/battery
-circuitry. See `docs/wiring.md`.
+circuitry. The servo doesn't need a GPIO of its own: it's driven through a
+PCA9685 sharing the touch controller's I2C bus (different address). See
+`docs/wiring.md`.
 
 ## How it works
 
-- `ServoSweep` (include/servo_sweep.h) drives the servo directly via the
-  ESP32's LEDC PWM peripheral, sweeping back and forth between two angles.
+- `ServoSweep` (include/servo_sweep.h) drives the servo through a PCA9685
+  I2C PWM driver, sweeping back and forth between two angles.
 - `Ultrasonic` (include/ultrasonic.h) pings the HC-SR04 and converts echo
   time to distance.
 - `main.cpp` polls both every loop, plots each hit as a fading red blip at

@@ -33,13 +33,22 @@
 #define TOUCH_RST   -1  // TODO
 
 // ============================================================================
-// Servo + ultrasonic sensor pins — these ARE yours to choose, from whatever
-// GPIOs are broken out on the board's expansion header and not already
-// claimed by the display/touch/IMU/RTC/battery-monitor circuitry above.
-// Check the board's silkscreen or pinout diagram on the wiki, pick any two
-// free digital-capable GPIOs, and fill them in here.
+// Servo (via PCA9685) + ultrasonic sensor pins — these ARE yours to choose,
+// from whatever GPIOs are broken out on the board's expansion header and
+// not already claimed by the display/touch/IMU/RTC/battery-monitor
+// circuitry above. Check the board's silkscreen or pinout diagram on the
+// wiki, pick free pins, and fill them in here.
 // ============================================================================
 
-#define SERVO_PIN        -1  // TODO: pick a free GPIO, PWM-capable (any GPIO works via LEDC)
+// PCA9685 shares the I2C bus with the touch controller (same SDA/SCL,
+// different address) rather than claiming two more GPIOs. If your board's
+// touch bus pins above turn out unusable for a second device for some
+// reason, wire the PCA9685 to its own free GPIO pair instead and set
+// these independently.
+#define PCA9685_SDA       TOUCH_SDA
+#define PCA9685_SCL       TOUCH_SCL
+#define PCA9685_I2C_ADDR  0x40   // default PCA9685 address (all A0-A5 jumpers open)
+#define SERVO_CHANNEL     0      // PCA9685 output channel the servo is wired to
+
 #define ULTRASONIC_TRIG   -1  // TODO: free GPIO, digital output
 #define ULTRASONIC_ECHO   -1  // TODO: free GPIO, digital input (see docs/wiring.md re: 5V echo signal)

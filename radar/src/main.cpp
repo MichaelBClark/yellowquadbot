@@ -12,7 +12,9 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include <Wire.h>
 #include <Arduino_GFX_Library.h>
+#include <Adafruit_PWMServoDriver.h>
 
 #include "pins.h"
 #include "ultrasonic.h"
@@ -24,7 +26,8 @@ Arduino_DataBus *bus = new Arduino_ESP32QSPI(
 Arduino_GFX *gfx = new Arduino_SH8601(bus, LCD_RST, 0 /* rotation */,
                                        false /* IPS */, LCD_WIDTH, LCD_HEIGHT);
 
-ServoSweep servo(SERVO_PIN, 5, 175, 90.0f);   // degrees/sec sweep speed
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDR, Wire);
+ServoSweep servo(pwm, SERVO_CHANNEL, 5, 175, 90.0f); // degrees/sec sweep speed
 Ultrasonic sonar(ULTRASONIC_TRIG, ULTRASONIC_ECHO, 200.0f); // 200cm max range
 
 // ---- Radar display geometry ----
@@ -113,6 +116,10 @@ void setup() {
     while (true) delay(1000);
   }
   gfx->fillScreen(COLOR_BG);
+
+  Wire.begin(PCA9685_SDA, PCA9685_SCL);
+  pwm.begin();
+  pwm.setPWMFreq(50); // standard hobby servo rate
 
   servo.begin();
   sonar.begin();

@@ -1,19 +1,18 @@
 #pragma once
 #include <Arduino.h>
+#include <Adafruit_PWMServoDriver.h>
 
-// Drives a standard hobby servo directly from the ESP32-S3's LEDC PWM
-// peripheral (no external servo library needed) and sweeps it back and
-// forth between two angles, like a classic ping-radar head.
+// Drives a standard hobby servo through a PCA9685 I2C PWM driver and
+// sweeps it back and forth between two angles, like a classic ping-radar
+// head. Pass in an already-begin()'d Adafruit_PWMServoDriver.
 class ServoSweep {
 public:
-  ServoSweep(int pin, int minDeg = 15, int maxDeg = 165, float degPerSec = 60.0f)
-      : pin_(pin), minDeg_(minDeg), maxDeg_(maxDeg), degPerSec_(degPerSec),
-        angle_(minDeg), direction_(1) {}
+  ServoSweep(Adafruit_PWMServoDriver &pwm, uint8_t channel, int minDeg = 15,
+             int maxDeg = 165, float degPerSec = 60.0f)
+      : pwm_(pwm), channel_(channel), minDeg_(minDeg), maxDeg_(maxDeg),
+        degPerSec_(degPerSec), angle_(minDeg), direction_(1) {}
 
-  void begin() {
-    ledcAttach(pin_, 50 /* Hz */, 14 /* bit resolution */);
-    writeAngle(angle_);
-  }
+  void begin() { writeAngle(angle_); }
 
   // Call every loop iteration; advances the sweep angle based on elapsed
   // time and returns the current commanded angle in degrees.
@@ -41,14 +40,15 @@ public:
 private:
   void writeAngle(float deg) {
     deg = constrain(deg, 0.0f, 180.0f);
-    // Standard hobby servo: 500-2500us pulse over a 20ms (50Hz) period.
+    // Standard hobby servo: 500-2500us pulse. The PCA9685 counts run
+    // 0-4095 over a 20ms (50Hz) period, so convert pulse width to ticks.
     uint32_t pulseUs = 500 + (uint32_t)((deg / 180.0f) * 2000.0f);
-    uint32_t maxDuty = (1 << 14) - 1;
-    uint32_t duty = (uint32_t)(((uint64_t)pulseUs * maxDuty) / 20000);
-    ledcWrite(pin_, duty);
+    uint16_t ticks = (uint16_t)((pulseUs * 4096UL) / 20000UL);
+    pwm_.setPWM(channel_, 0, ticks);
   }
 
-  int pin_;
+  Adafruit_PWMServoDriver &pwm_;
+  uint8_t channel_;
   int minDeg_, maxDeg_;
   float degPerSec_;
   float angle_;
