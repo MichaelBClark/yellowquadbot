@@ -107,9 +107,43 @@ void drawFrame(float sweepAngleDeg) {
                 polarY(sweepAngleDeg, MAX_RADIUS), COLOR_SWEEP);
 }
 
+// pins.h ships with every pin set to -1 as a "not filled in yet" sentinel.
+// Passing -1 to pinMode()/Wire.begin()/the QSPI display driver doesn't fail
+// cleanly - it corrupts GPIO/bus state and crashes with an opaque
+// StoreProhibited panic. Catch it here instead, before anything touches
+// hardware, and say plainly what's missing.
+void haltIfPinsUnset() {
+  struct NamedPin { const char *name; int pin; };
+  const NamedPin required[] = {
+      {"LCD_SDIO0", LCD_SDIO0}, {"LCD_SDIO1", LCD_SDIO1},
+      {"LCD_SDIO2", LCD_SDIO2}, {"LCD_SDIO3", LCD_SDIO3},
+      {"LCD_SCLK", LCD_SCLK},   {"LCD_CS", LCD_CS},
+      {"LCD_RST", LCD_RST},
+      {"PCA9685_SDA", PCA9685_SDA}, {"PCA9685_SCL", PCA9685_SCL},
+      {"ULTRASONIC_TRIG", ULTRASONIC_TRIG},
+      {"ULTRASONIC_ECHO", ULTRASONIC_ECHO},
+  };
+
+  bool missing = false;
+  for (auto &p : required) {
+    if (p.pin < 0) {
+      Serial.printf("pins.h: %s is still -1 (not filled in)\n", p.name);
+      missing = true;
+    }
+  }
+  if (!missing) return;
+
+  Serial.println("Halting before touching any hardware - fill in the pins "
+                  "above in pins.h (see README.md / docs/wiring.md) and "
+                  "re-flash. LCD_TE is allowed to stay -1, it's optional.");
+  while (true) delay(1000);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
+
+  haltIfPinsUnset();
 
   if (!gfx->begin()) {
     Serial.println("Display init failed - check pins.h against Waveshare's demo pin_config.h");
