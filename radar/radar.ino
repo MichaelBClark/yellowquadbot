@@ -2,7 +2,7 @@
 // 1.46" round AMOLED (412x412), servo-swept HC-SR04.
 //
 // !! Before flashing: fill in the real display/touch pins in
-// include/pins.h from Waveshare's own demo code (see the comment block at
+// pins.h from Waveshare's own demo code (see the comment block at
 // the top of that file) and the servo/ultrasonic pins for whichever free
 // GPIOs you wired them to. This file assumes those are correct.
 //

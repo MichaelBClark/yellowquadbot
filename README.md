@@ -29,7 +29,8 @@ controller/   PlatformIO project for the robot body (ESP32 WROOM + PCA9685)
 joystick/     PlatformIO project for the handheld controller (XIAO ESP32C6)
 docs/         wiring notes, calibration notes (for controller/joystick)
 radar/        unrelated side project: ultrasonic ping-radar display on a
-              Waveshare ESP32-S3 round AMOLED, see radar/README.md
+              Waveshare ESP32-S3 round AMOLED, Arduino IDE sketch
+              (radar/radar.ino), see radar/README.md
 ```
 
 Each subdirectory is its own PlatformIO project (different boards), so open

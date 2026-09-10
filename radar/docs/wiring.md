@@ -4,7 +4,7 @@
 
 Already wired on-board (QSPI to the AMOLED module, I2C to the touch
 controller) — nothing to connect there. You only need to get the pin
-*numbers* right in `include/pins.h`, copied from Waveshare's demo code as
+*numbers* right in `pins.h`, copied from Waveshare's demo code as
 described in the top-level README.
 
 ## Ultrasonic sensor (HC-SR04)
@@ -63,5 +63,5 @@ onboard IMU and RTC (I2C), and battery voltage monitor (ADC) all claim
 GPIOs on this board already. Check the pinout diagram on Waveshare's wiki
 page for this product to see which GPIOs are broken out on the
 unpopulated header/pads and not already spoken for, then use any two of
-those for `ULTRASONIC_TRIG`/`ULTRASONIC_ECHO` in `include/pins.h`. Neither
+those for `ULTRASONIC_TRIG`/`ULTRASONIC_ECHO` in `pins.h`. Neither
 needs to be anything special — plain digital I/O is enough.

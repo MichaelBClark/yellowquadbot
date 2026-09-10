@@ -16,9 +16,31 @@ code elsewhere in this repo — just sharing the repo for convenience.
 - External 5V supply for the servo, wired to the PCA9685's V+ rail — don't
   power it from the ESP32-S3 board's 5V/USB pin
 
+## Building with the Arduino IDE
+
+This is a standard Arduino sketch — open `radar.ino` (the folder is named
+`radar` to match, as Arduino requires) directly in the Arduino IDE. It'll
+show `pins.h`, `servo_sweep.h`, and `ultrasonic.h` as additional tabs
+alongside `radar.ino`.
+
+1. **Board support**: `File → Preferences → Additional Boards Manager URLs`,
+   add `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
+   if not already present, then `Tools → Board → Boards Manager`, search
+   "esp32", install the Espressif package (needs a recent version — this
+   board's SH8601 AMOLED support and the modern `ledc`-free PCA9685 setup
+   assume Arduino-ESP32 core 3.x).
+2. **Board selection**: `Tools → Board → esp32 → ESP32S3 Dev Module`. Under
+   `Tools`, also set: USB CDC On Boot = Enabled (needed for Serial over
+   the native USB port), PSRAM = OPI PSRAM (this board has PSRAM; check
+   Waveshare's product page to confirm the exact PSRAM type/mode).
+3. **Libraries**: `Sketch → Include Library → Manage Libraries`, install:
+   - **GFX Library for Arduino** (by moononournation) — display driver
+   - **Adafruit PWM Servo Driver Library** — PCA9685
+4. Fill in `pins.h` (see below), select the right serial port, and upload.
+
 ## Before you flash anything
 
-`include/pins.h` has the display/touch pins set to `-1` placeholders.
+`pins.h` has the display/touch pins set to `-1` placeholders.
 **Do not guess these.** Get the real numbers from Waveshare's own demo
 code for this exact product (download it from the product's page on
 their wiki — look for a `pin_config.h` or similar in the demo bundle) and
@@ -34,21 +56,21 @@ PCA9685 sharing the touch controller's I2C bus (different address). See
 
 ## How it works
 
-- `ServoSweep` (include/servo_sweep.h) drives the servo through a PCA9685
+- `ServoSweep` (servo_sweep.h) drives the servo through a PCA9685
   I2C PWM driver, sweeping back and forth between two angles.
-- `Ultrasonic` (include/ultrasonic.h) pings the HC-SR04 and converts echo
+- `Ultrasonic` (ultrasonic.h) pings the HC-SR04 and converts echo
   time to distance.
-- `main.cpp` polls both every loop, plots each hit as a fading red blip at
+- `radar.ino` polls both every loop, plots each hit as a fading red blip at
   (servo angle, distance) in polar coordinates on the top semicircle of
   the screen — the classic "ping radar" look — with a green sweep line
   following the servo in real time.
 
 ## Tuning
 
-- `ServoSweep(pin, minDeg, maxDeg, degPerSec)` in `main.cpp` — narrower
-  sweep range or slower `degPerSec` gives the ultrasonic sensor more time
-  per angle, which matters since HC-SR04 pings take a few ms and the code
-  waits for one before moving on.
+- `ServoSweep(pwm, channel, minDeg, maxDeg, degPerSec)` in `radar.ino` —
+  narrower sweep range or slower `degPerSec` gives the ultrasonic sensor
+  more time per angle, which matters since HC-SR04 pings take a few ms and
+  the code waits for one before moving on.
 - `MAX_RANGE_CM` / `Ultrasonic(...)`'s max range argument — set to
   whatever your sensor and use case need; readings beyond it are dropped
   rather than plotted, so the display doesn't get confusing false-far
