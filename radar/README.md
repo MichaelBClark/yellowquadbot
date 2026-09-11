@@ -41,16 +41,18 @@ alongside `radar.ino`.
 ## Before you flash anything
 
 `pins.h` is filled in with GPIO numbers confirmed from Waveshare's own docs
-for this board. One thing it can't paper over: **`LCD_RST` (and the touch
-controller's `TP_RST`) are wired through an onboard I2C GPIO expander, not
-a plain ESP32 pin.** `radar.ino` currently boots the display without
-driving that reset line at all (relies on power-on reset), which is often
-fine but is the first thing to suspect if `gfx->begin()` fails or the
-screen stays blank. Driving it properly means adding the expander-aware
-bus/reset class from the `GFX Library for Arduino` — check that library's
-examples for this exact board (search its repo for
-"ESP32-S3-Touch-LCD-1.46" or "AMOLED 1.46") for the expander chip's I2C
-address and the right constructor, rather than guessing.
+for this board. `LCD_RST` (and the touch controller's `TP_RST`) are wired
+through an onboard I2C GPIO expander rather than a plain ESP32 pin —
+`io_expander.h` drives it using the standard PCA9554/TCA9554 register
+layout, which is what that whole family of cheap 8-bit I2C GPIO expanders
+uses regardless of exact part number. `IO_EXPANDER_I2C_ADDR` in `pins.h`
+defaults to `0x20` (that family's default address with all address pins
+tied low) — **check this against the boot-time I2C scan** (`radar.ino`
+prints every address it finds on the bus before touching the display) and
+update `pins.h` if your board's expander shows up somewhere else. Getting
+the reset line driven correctly matters: without it the display can come
+up half-initialized, which looks like garbled colored bars rather than a
+clean picture or a clean failure.
 
 The ultrasonic sensor's `TRIG`/`ECHO` pins are set to this board's only
 other exposed digital pins (the UART TXD/RXD header, repurposed as plain

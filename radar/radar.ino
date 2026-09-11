@@ -2,9 +2,12 @@
 // ESP32-S3-Touch-LCD-1.46 (412x412 round display), servo-swept HC-SR04.
 //
 // Pin numbers in pins.h are confirmed from Waveshare's own docs
-// (docs.waveshare.com/ESP32-S3-Touch-LCD-1.46). One open item: LCD_RST is
-// wired through an onboard I2C GPIO expander, not driven directly by this
-// code yet - see the comment above the Arduino_SH8601 constructor below.
+// (docs.waveshare.com/ESP32-S3-Touch-LCD-1.46). LCD_RST/TP_RST are wired
+// through an onboard I2C GPIO expander rather than plain ESP32 pins,
+// driven here via io_expander.h - see resetDisplayAndTouch() below. If the
+// display still doesn't come up cleanly, check the boot-time I2C scan
+// output against IO_EXPANDER_I2C_ADDR in pins.h; that address is a common
+// default, not a confirmed one.
 //
 // Classic "ping radar" layout: servo sweeps 0-180 degrees, pivot at the
 // bottom-center of the screen, targets plotted in the top semicircle with
@@ -19,20 +22,15 @@
 #include "pins.h"
 #include "ultrasonic.h"
 #include "servo_sweep.h"
+#include "io_expander.h"
 
 // ---- Display bring-up (QSPI SH8601 round AMOLED) ----
 //
-// !! LCD_RST is wired through the board's I2C GPIO expander (EXIO2), not a
-// plain ESP32 pin - see the big comment on LCD_RST_EXIO_PIN in pins.h. This
-// code passes GFX_NOT_DEFINED (no reset line) to Arduino_GFX rather than
-// silently getting that wrong, which means the display relies on its
-// power-on reset instead of an explicit one. That's usually fine for a
-// clean boot, but if gfx->begin() fails or the panel stays blank, the
-// expander-driven reset is the most likely reason and needs adding
-// (Arduino_GFX has expander-aware bus/reset classes - search its examples
-// for this exact board, "ESP32-S3-Touch-LCD-1.46" or "1.46 AMOLED", for
-// the expander chip's I2C address and correct wiring, rather than
-// guessing).
+// LCD_RST is wired through the board's I2C GPIO expander (EXIO2), not a
+// plain ESP32 pin. It's pulsed via IoExpander in resetDisplayAndTouch(),
+// called from setup() before gfx->begin() - GFX_NOT_DEFINED here just
+// means "Arduino_GFX itself doesn't drive a reset pin", not that nothing
+// resets the panel.
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
     LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
 Arduino_GFX *gfx = new Arduino_SH8601(bus, GFX_NOT_DEFINED /* RST */, 0 /* rotation */,
@@ -41,6 +39,7 @@ Arduino_GFX *gfx = new Arduino_SH8601(bus, GFX_NOT_DEFINED /* RST */, 0 /* rotat
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDR, Wire);
 ServoSweep servo(pwm, SERVO_CHANNEL, 5, 175, 90.0f); // degrees/sec sweep speed
 Ultrasonic sonar(ULTRASONIC_TRIG, ULTRASONIC_ECHO, 200.0f); // 200cm max range
+IoExpander expander(Wire, IO_EXPANDER_I2C_ADDR);
 
 // ---- Radar display geometry ----
 constexpr int16_t CENTER_X = LCD_WIDTH / 2;
@@ -149,6 +148,30 @@ void haltIfPinsUnset() {
   while (true) delay(1000);
 }
 
+// Prints every I2C address that responds on the bus. Run this once to
+// confirm IO_EXPANDER_I2C_ADDR in pins.h (and PCA9685_I2C_ADDR, and the
+// touch controller's address if you care) against what's actually on your
+// board, rather than trusting a guessed default.
+void scanI2CBus() {
+  Serial.println("Scanning I2C bus...");
+  int found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  found device at 0x%02X\n", addr);
+      found++;
+    }
+  }
+  if (found == 0) Serial.println("  no I2C devices found - check TOUCH_SDA/TOUCH_SCL wiring/pins");
+}
+
+void resetDisplayAndTouch() {
+  expander.pinModeOutput(LCD_RST_EXIO_PIN);
+  expander.pinModeOutput(TOUCH_RST_EXIO_PIN);
+  expander.pulseResetLow(LCD_RST_EXIO_PIN);
+  expander.pulseResetLow(TOUCH_RST_EXIO_PIN);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -158,13 +181,16 @@ void setup() {
   pinMode(LCD_BL, OUTPUT);
   digitalWrite(LCD_BL, HIGH); // backlight on
 
+  Wire.begin(PCA9685_SDA, PCA9685_SCL);
+  scanI2CBus();
+  resetDisplayAndTouch();
+
   if (!gfx->begin()) {
     Serial.println("Display init failed - check pins.h against Waveshare's demo pin_config.h");
     while (true) delay(1000);
   }
   gfx->fillScreen(COLOR_BG);
 
-  Wire.begin(PCA9685_SDA, PCA9685_SCL);
   pwm.begin();
   pwm.setPWMFreq(50); // standard hobby servo rate
 

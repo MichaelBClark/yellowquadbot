@@ -19,11 +19,17 @@
 
 // !! LCD_RST is NOT a plain ESP32 GPIO !!
 // Waveshare's pinout lists it as "EXIO2" - wired through an onboard I2C
-// GPIO expander (commonly a TCA9554/XCA9554 on this board family), not
-// directly to the ESP32-S3. You cannot pinMode()/digitalWrite() it like a
-// normal pin. main .ino currently does NOT drive this correctly - see the
-// big comment in radar.ino's display bring-up section before flashing.
+// GPIO expander, not directly to the ESP32-S3. radar.ino drives it via
+// IoExpander (io_expander.h) using the standard PCA9554/TCA9554 register
+// layout, found on address IO_EXPANDER_I2C_ADDR below.
 #define LCD_RST_EXIO_PIN 2   // expander pin number, NOT an ESP32 GPIO
+
+// TODO: confirm this against radar.ino's boot-time I2C scan output (it
+// prints every address found on the bus before touching the display).
+// 0x20 is the PCA9554/TCA9554 family's default when all address pins are
+// tied low, which is the common default for this role - but "common
+// default" isn't "confirmed for your board", so check the scan.
+#define IO_EXPANDER_I2C_ADDR 0x20
 
 // ---- Touch controller (I2C) ----
 // This is the SAME bus as the board's exposed 2-pin I2C header (GND/3V3/
