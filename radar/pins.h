@@ -1,54 +1,56 @@
 #pragma once
 
 // ============================================================================
-// !! VERIFY THESE AGAINST WAVESHARE'S OWN DEMO CODE BEFORE FLASHING !!
-//
-// The QSPI display pins below are PLACEHOLDERS. This board's exact GPIO
-// wiring is defined by Waveshare's schematic, not something safe to guess.
-// Get the real values from the "pin_config.h" (or equivalent) file in the
-// demo/example code bundle on this product's Waveshare wiki page:
-//   "ESP32-S3 1.46inch Round Display Development Board" -> Resources/Demo
-// Copy the LCD_* and TOUCH_* pin numbers from there into this file. Do not
-// trust the numbers below as correct for your board.
+// Pin numbers below are confirmed from Waveshare's own docs for this exact
+// board (ESP32-S3-Touch-LCD-1.46, docs.waveshare.com/ESP32-S3-Touch-LCD-1.46).
 // ============================================================================
 
-// ---- Display (SH8601 AMOLED, QSPI) ----
-#define LCD_SDIO0   -1  // TODO: copy from Waveshare pin_config.h
-#define LCD_SDIO1   -1  // TODO
-#define LCD_SDIO2   -1  // TODO
-#define LCD_SDIO3   -1  // TODO
-#define LCD_SCLK    -1  // TODO
-#define LCD_CS      -1  // TODO
-#define LCD_RST     -1  // TODO (-1 if tied to EN/not separately controlled)
-#define LCD_TE      -1  // TODO (tearing-effect pin, if used)
+// ---- Display (QSPI, 4 data lines + clock + chip-select) ----
+#define LCD_SDIO0   46
+#define LCD_SDIO1   45
+#define LCD_SDIO2   42
+#define LCD_SDIO3   41
+#define LCD_SCLK    40
+#define LCD_CS      21
+#define LCD_TE      18   // tearing-effect pin
+#define LCD_BL      5    // backlight, plain GPIO - HIGH to turn on
 #define LCD_WIDTH   412
 #define LCD_HEIGHT  412
 
-// ---- Touch (CST816-family, I2C) ----
-// Not used by the radar app, listed here only so you don't accidentally
-// reuse these pins for the servo/ultrasonic wiring below.
-#define TOUCH_SDA   -1  // TODO
-#define TOUCH_SCL   -1  // TODO
-#define TOUCH_INT   -1  // TODO
-#define TOUCH_RST   -1  // TODO
+// !! LCD_RST is NOT a plain ESP32 GPIO !!
+// Waveshare's pinout lists it as "EXIO2" - wired through an onboard I2C
+// GPIO expander (commonly a TCA9554/XCA9554 on this board family), not
+// directly to the ESP32-S3. You cannot pinMode()/digitalWrite() it like a
+// normal pin. main .ino currently does NOT drive this correctly - see the
+// big comment in radar.ino's display bring-up section before flashing.
+#define LCD_RST_EXIO_PIN 2   // expander pin number, NOT an ESP32 GPIO
+
+// ---- Touch controller (I2C) ----
+// This is the SAME bus as the board's exposed 2-pin I2C header (GND/3V3/
+// SCL/SDA), confirmed by Waveshare's docs listing the header's SCL/SDA on
+// the identical GPIO10/GPIO11 as TP_SCL/TP_SDA.
+#define TOUCH_SDA   11
+#define TOUCH_SCL   10
+#define TOUCH_INT   4
+
+// !! TP_RST is ALSO on the I2C expander, not a plain GPIO !!
+#define TOUCH_RST_EXIO_PIN 1   // expander pin number, NOT an ESP32 GPIO
 
 // ============================================================================
-// Servo (via PCA9685) + ultrasonic sensor pins — these ARE yours to choose,
-// from whatever GPIOs are broken out on the board's expansion header and
-// not already claimed by the display/touch/IMU/RTC/battery-monitor
-// circuitry above. Check the board's silkscreen or pinout diagram on the
-// wiki, pick free pins, and fill them in here.
+// Servo (via PCA9685) + ultrasonic sensor pins.
 // ============================================================================
 
-// PCA9685 shares the I2C bus with the touch controller (same SDA/SCL,
-// different address) rather than claiming two more GPIOs. If your board's
-// touch bus pins above turn out unusable for a second device for some
-// reason, wire the PCA9685 to its own free GPIO pair instead and set
-// these independently.
+// PCA9685 shares the I2C bus with the touch controller / exposed I2C
+// header (same SDA/SCL, different address) rather than claiming more GPIOs.
 #define PCA9685_SDA       TOUCH_SDA
 #define PCA9685_SCL       TOUCH_SCL
 #define PCA9685_I2C_ADDR  0x40   // default PCA9685 address (all A0-A5 jumpers open)
 #define SERVO_CHANNEL     0      // PCA9685 output channel the servo is wired to
 
-#define ULTRASONIC_TRIG   -1  // TODO: free GPIO, digital output
-#define ULTRASONIC_ECHO   -1  // TODO: free GPIO, digital input (see docs/wiring.md re: 5V echo signal)
+// This board only exposes two other digital pins on a header (besides the
+// I2C pair above): the UART TXD/RXD pair, GPIO43/44. Waveshare's docs note
+// these can be used as plain GPIO instead of UART - which is what we do
+// here, since this sketch's serial console runs over the native USB CDC
+// port (ARDUINO_USB_CDC_ON_BOOT), not this UART.
+#define ULTRASONIC_TRIG   43
+#define ULTRASONIC_ECHO   44   // see docs/wiring.md re: 5V echo signal - needs a voltage divider

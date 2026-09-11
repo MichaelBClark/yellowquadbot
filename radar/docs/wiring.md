@@ -2,10 +2,12 @@
 
 ## Display / touch
 
-Already wired on-board (QSPI to the AMOLED module, I2C to the touch
-controller) — nothing to connect there. You only need to get the pin
-*numbers* right in `pins.h`, copied from Waveshare's demo code as
-described in the top-level README.
+Already wired on-board (QSPI to the round display, I2C to the touch
+controller) — nothing to connect there. Pin numbers in `pins.h` are
+confirmed from Waveshare's docs for this board
+(docs.waveshare.com/ESP32-S3-Touch-LCD-1.46). One caveat: `LCD_RST` and
+`TP_RST` are wired through an onboard I2C GPIO expander rather than plain
+ESP32 pins — see the README's "Before you flash anything" section.
 
 ## Ultrasonic sensor (HC-SR04)
 
@@ -56,12 +58,12 @@ supply into the PCA9685's V+ terminal. If you add more servos later or
 upgrade to something higher-torque, budget the supply for their combined
 stall current — same reasoning as any multi-servo project.
 
-## Picking free GPIOs (ultrasonic sensor)
+## Ultrasonic sensor pin choice
 
-The display (QSPI, 4-6 pins), touch controller (I2C + interrupt/reset),
-onboard IMU and RTC (I2C), and battery voltage monitor (ADC) all claim
-GPIOs on this board already. Check the pinout diagram on Waveshare's wiki
-page for this product to see which GPIOs are broken out on the
-unpopulated header/pads and not already spoken for, then use any two of
-those for `ULTRASONIC_TRIG`/`ULTRASONIC_ECHO` in `pins.h`. Neither
-needs to be anything special — plain digital I/O is enough.
+This board only breaks out two header pins beyond the I2C pair used
+above: a UART TXD/RXD pair (GPIO43/44). Waveshare's docs note these can be
+used as plain GPIO instead — which is what `pins.h` does, since this
+sketch's serial console runs over the native USB port
+(`ARDUINO_USB_CDC_ON_BOOT`), not this UART. That's why `ULTRASONIC_TRIG`/
+`ULTRASONIC_ECHO` are set to 43/44 rather than some other "free" pin —
+there isn't another header pair available on this particular board.

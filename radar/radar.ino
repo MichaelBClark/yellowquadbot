@@ -1,10 +1,10 @@
-// yellowquadbot/radar — ultrasonic ping-radar on a Waveshare ESP32-S3
-// 1.46" round AMOLED (412x412), servo-swept HC-SR04.
+// yellowquadbot/radar — ultrasonic ping-radar on a Waveshare
+// ESP32-S3-Touch-LCD-1.46 (412x412 round display), servo-swept HC-SR04.
 //
-// !! Before flashing: fill in the real display/touch pins in
-// pins.h from Waveshare's own demo code (see the comment block at
-// the top of that file) and the servo/ultrasonic pins for whichever free
-// GPIOs you wired them to. This file assumes those are correct.
+// Pin numbers in pins.h are confirmed from Waveshare's own docs
+// (docs.waveshare.com/ESP32-S3-Touch-LCD-1.46). One open item: LCD_RST is
+// wired through an onboard I2C GPIO expander, not driven directly by this
+// code yet - see the comment above the Arduino_SH8601 constructor below.
 //
 // Classic "ping radar" layout: servo sweeps 0-180 degrees, pivot at the
 // bottom-center of the screen, targets plotted in the top semicircle with
@@ -21,9 +21,21 @@
 #include "servo_sweep.h"
 
 // ---- Display bring-up (QSPI SH8601 round AMOLED) ----
+//
+// !! LCD_RST is wired through the board's I2C GPIO expander (EXIO2), not a
+// plain ESP32 pin - see the big comment on LCD_RST_EXIO_PIN in pins.h. This
+// code passes GFX_NOT_DEFINED (no reset line) to Arduino_GFX rather than
+// silently getting that wrong, which means the display relies on its
+// power-on reset instead of an explicit one. That's usually fine for a
+// clean boot, but if gfx->begin() fails or the panel stays blank, the
+// expander-driven reset is the most likely reason and needs adding
+// (Arduino_GFX has expander-aware bus/reset classes - search its examples
+// for this exact board, "ESP32-S3-Touch-LCD-1.46" or "1.46 AMOLED", for
+// the expander chip's I2C address and correct wiring, rather than
+// guessing).
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
     LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-Arduino_GFX *gfx = new Arduino_SH8601(bus, LCD_RST, 0 /* rotation */,
+Arduino_GFX *gfx = new Arduino_SH8601(bus, GFX_NOT_DEFINED /* RST */, 0 /* rotation */,
                                        false /* IPS */, LCD_WIDTH, LCD_HEIGHT);
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDR, Wire);
@@ -107,18 +119,17 @@ void drawFrame(float sweepAngleDeg) {
                 polarY(sweepAngleDeg, MAX_RADIUS), COLOR_SWEEP);
 }
 
-// pins.h ships with every pin set to -1 as a "not filled in yet" sentinel.
-// Passing -1 to pinMode()/Wire.begin()/the QSPI display driver doesn't fail
-// cleanly - it corrupts GPIO/bus state and crashes with an opaque
-// StoreProhibited panic. Catch it here instead, before anything touches
-// hardware, and say plainly what's missing.
+// Cheap insurance against a pin accidentally getting set to -1 (or left
+// unset) in a future edit of pins.h - passing -1 to pinMode()/Wire.begin()/
+// the QSPI display driver doesn't fail cleanly, it corrupts GPIO/bus state
+// and crashes with an opaque Guru Meditation StoreProhibited panic. Catch
+// it here instead, before anything touches hardware.
 void haltIfPinsUnset() {
   struct NamedPin { const char *name; int pin; };
   const NamedPin required[] = {
       {"LCD_SDIO0", LCD_SDIO0}, {"LCD_SDIO1", LCD_SDIO1},
       {"LCD_SDIO2", LCD_SDIO2}, {"LCD_SDIO3", LCD_SDIO3},
-      {"LCD_SCLK", LCD_SCLK},   {"LCD_CS", LCD_CS},
-      {"LCD_RST", LCD_RST},
+      {"LCD_SCLK", LCD_SCLK},   {"LCD_CS", LCD_CS}, {"LCD_BL", LCD_BL},
       {"PCA9685_SDA", PCA9685_SDA}, {"PCA9685_SCL", PCA9685_SCL},
       {"ULTRASONIC_TRIG", ULTRASONIC_TRIG},
       {"ULTRASONIC_ECHO", ULTRASONIC_ECHO},
@@ -127,15 +138,14 @@ void haltIfPinsUnset() {
   bool missing = false;
   for (auto &p : required) {
     if (p.pin < 0) {
-      Serial.printf("pins.h: %s is still -1 (not filled in)\n", p.name);
+      Serial.printf("pins.h: %s is -1/unset\n", p.name);
       missing = true;
     }
   }
   if (!missing) return;
 
-  Serial.println("Halting before touching any hardware - fill in the pins "
-                  "above in pins.h (see README.md / docs/wiring.md) and "
-                  "re-flash. LCD_TE is allowed to stay -1, it's optional.");
+  Serial.println("Halting before touching any hardware - fix the pins "
+                  "above in pins.h and re-flash.");
   while (true) delay(1000);
 }
 
@@ -144,6 +154,9 @@ void setup() {
   delay(200);
 
   haltIfPinsUnset();
+
+  pinMode(LCD_BL, OUTPUT);
+  digitalWrite(LCD_BL, HIGH); // backlight on
 
   if (!gfx->begin()) {
     Serial.println("Display init failed - check pins.h against Waveshare's demo pin_config.h");

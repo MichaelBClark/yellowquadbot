@@ -6,8 +6,8 @@ code elsewhere in this repo — just sharing the repo for convenience.
 
 ## Hardware
 
-- Waveshare ESP32-S3 1.46" Round Display Development Board (SH8601 AMOLED,
-  QSPI, 412x412, CST816-family touch — touch isn't used here)
+- Waveshare ESP32-S3-Touch-LCD-1.46 (412x412 round display, QSPI; touch
+  isn't used here — docs.waveshare.com/ESP32-S3-Touch-LCD-1.46)
 - HC-SR04 ultrasonic distance sensor
 - 1x hobby servo (SG90 or similar) to sweep the sensor
 - PCA9685 16-channel I2C PWM/servo driver (the servo is driven through
@@ -40,19 +40,22 @@ alongside `radar.ino`.
 
 ## Before you flash anything
 
-`pins.h` has the display/touch pins set to `-1` placeholders.
-**Do not guess these.** Get the real numbers from Waveshare's own demo
-code for this exact product (download it from the product's page on
-their wiki — look for a `pin_config.h` or similar in the demo bundle) and
-copy them in. Getting these wrong won't just fail to work, it can drive
-pins in ways the AMOLED module doesn't expect.
+`pins.h` is filled in with GPIO numbers confirmed from Waveshare's own docs
+for this board. One thing it can't paper over: **`LCD_RST` (and the touch
+controller's `TP_RST`) are wired through an onboard I2C GPIO expander, not
+a plain ESP32 pin.** `radar.ino` currently boots the display without
+driving that reset line at all (relies on power-on reset), which is often
+fine but is the first thing to suspect if `gfx->begin()` fails or the
+screen stays blank. Driving it properly means adding the expander-aware
+bus/reset class from the `GFX Library for Arduino` — check that library's
+examples for this exact board (search its repo for
+"ESP32-S3-Touch-LCD-1.46" or "AMOLED 1.46") for the expander chip's I2C
+address and the right constructor, rather than guessing.
 
-The ultrasonic sensor's pins are also `-1` placeholders — those you *do*
-choose yourself, from whichever GPIOs the board's expansion header breaks
-out that aren't already claimed by the display/touch/IMU/RTC/battery
-circuitry. The servo doesn't need a GPIO of its own: it's driven through a
-PCA9685 sharing the touch controller's I2C bus (different address). See
-`docs/wiring.md`.
+The ultrasonic sensor's `TRIG`/`ECHO` pins are set to this board's only
+other exposed digital pins (the UART TXD/RXD header, repurposed as plain
+GPIO since this sketch's serial console runs over native USB, not that
+UART) — see `docs/wiring.md` for the full pinout and reasoning.
 
 ## How it works
 
