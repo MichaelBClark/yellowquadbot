@@ -3,11 +3,11 @@
 ## Display / touch
 
 Already wired on-board (QSPI to the round display, I2C to the touch
-controller) — nothing to connect there. Pin numbers in `pins.h` are
-confirmed from Waveshare's docs for this board
-(docs.waveshare.com/ESP32-S3-Touch-LCD-1.46). One caveat: `LCD_RST` and
-`TP_RST` are wired through an onboard I2C GPIO expander rather than plain
-ESP32 pins — see the README's "Before you flash anything" section.
+controller/IO expander) — nothing to connect there. All of those pins are
+hardcoded in the driver files copied from Waveshare's own example
+(`Display_SPD2010.h`, `I2C_Driver.h`, `TCA9554PWR.h`) rather than in
+`pins.h` — see the README's "Display driver: why this isn't Arduino_GFX"
+section for why, and which files own what.
 
 ## Ultrasonic sensor (HC-SR04)
 
@@ -35,23 +35,21 @@ elsewhere in this repo.
 |-------------|-------------|
 | VCC (logic) | 3.3V |
 | GND | GND (common with everything else) |
-| SDA | `PCA9685_SDA` (defaults to the touch controller's SDA — same bus, different address, see below) |
-| SCL | `PCA9685_SCL` (defaults to the touch controller's SCL) |
+| SDA | GPIO11 (the board's I2C bus — same lines the touch controller and IO expander use, see `I2C_Driver.h`'s `I2C_SDA_PIN`) |
+| SCL | GPIO10 (`I2C_Driver.h`'s `I2C_SCL_PIN`) |
 | V+ (servo power rail) | External 5V supply, **not** the ESP32-S3 board's 5V/USB pin |
 | Channel 0 (or whichever you set `SERVO_CHANNEL` to) signal pin | Servo signal wire (orange/white) |
 
 Servo's own + and GND wires go to the PCA9685's screw terminal alongside
 V+ and GND, not to the ESP32-S3 board.
 
-**Sharing the I2C bus with touch:** I2C is a shared bus by design — multiple
-devices can sit on the same SDA/SCL lines as long as they have different
-addresses. The PCA9685 defaults to `0x40` (all address jumpers open),
-which won't collide with the touch controller's address, so reusing
-`TOUCH_SDA`/`TOUCH_SCL` for the PCA9685 (as `pins.h` does by default)
-saves you from needing two more free GPIOs. If that turns out not to work
-for your specific board/wiring, wire the PCA9685 to its own free GPIO
-pair instead and change `PCA9685_SDA`/`PCA9685_SCL` in `pins.h`
-accordingly — either way works, this is just the pin-frugal default.
+**Sharing the I2C bus:** I2C is a shared bus by design — multiple devices
+can sit on the same SDA/SCL lines as long as they have different
+addresses. This board already has the touch controller (`0x53`) and IO
+expander (`0x20`) on GPIO11/GPIO10; the PCA9685 defaults to `0x40`, which
+doesn't collide, so it rides the same bus (`radar.ino`'s `pwm.begin()`
+uses the global `Wire`, which `I2C_Init()` in `I2C_Driver.cpp` already
+pointed at GPIO11/GPIO10) rather than needing its own GPIOs.
 
 A single small servo (SG90-class) can usually run off a basic 5V USB
 supply into the PCA9685's V+ terminal. If you add more servos later or

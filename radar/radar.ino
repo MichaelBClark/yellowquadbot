@@ -1,13 +1,24 @@
 // yellowquadbot/radar — ultrasonic ping-radar on a Waveshare
 // ESP32-S3-Touch-LCD-1.46 (412x412 round display), servo-swept HC-SR04.
 //
-// Pin numbers in pins.h are confirmed from Waveshare's own docs
-// (docs.waveshare.com/ESP32-S3-Touch-LCD-1.46). LCD_RST/TP_RST are wired
-// through an onboard I2C GPIO expander rather than plain ESP32 pins,
-// driven here via io_expander.h - see resetDisplayAndTouch() below. If the
-// display still doesn't come up cleanly, check the boot-time I2C scan
-// output against IO_EXPANDER_I2C_ADDR in pins.h; that address is a common
-// default, not a confirmed one.
+// The display/touch controller is an SPD2010, which Arduino_GFX does not
+// support (its QSPI classes assume a different, 8-bit-command panel
+// protocol; SPD2010 needs ESP-IDF's esp_lcd_panel APIs with a 32-bit
+// command width and a dedicated vendor driver). I2C_Driver.*,
+// TCA9554PWR.*, Touch_SPD2010.*, esp_lcd_spd2010.*, and Display_SPD2010.*
+// in this folder are copied verbatim from Waveshare's own working example
+// for this exact board (waveshareteam/ESP32-S3-Touch-LCD-1.46,
+// example/Arduino-3.1.1/examples/LVGL_Arduino) rather than reimplemented,
+// since getting a QSPI panel's low-level init sequence subtly wrong
+// produces exactly the kind of garbled-but-not-crashing output this
+// project hit before finding that source.
+//
+// Display_SPD2010.h's LCD_addWindow() blits a full rectangular pixel
+// buffer - there's no drawLine/fillCircle primitive API like Arduino_GFX
+// had, so this file keeps its own tiny software framebuffer (one
+// LCD_WIDTH*LCD_HEIGHT array of RGB565 pixels in PSRAM) and draws into it
+// with plain Bresenham/midpoint routines, then blits the whole thing once
+// per frame.
 //
 // Classic "ping radar" layout: servo sweeps 0-180 degrees, pivot at the
 // bottom-center of the screen, targets plotted in the top semicircle with
@@ -16,41 +27,64 @@
 #include <Arduino.h>
 #include <math.h>
 #include <Wire.h>
-#include <Arduino_GFX_Library.h>
 #include <Adafruit_PWMServoDriver.h>
+
+#include "I2C_Driver.h"
+#include "TCA9554PWR.h"
+#include "Display_SPD2010.h"
 
 #include "pins.h"
 #include "ultrasonic.h"
 #include "servo_sweep.h"
-#include "io_expander.h"
-
-// ---- Display bring-up (QSPI SH8601 round AMOLED) ----
-//
-// LCD_RST is wired through the board's I2C GPIO expander (EXIO2), not a
-// plain ESP32 pin. It's pulsed via IoExpander in resetDisplayAndTouch(),
-// called from setup() before gfx->begin() - GFX_NOT_DEFINED here just
-// means "Arduino_GFX itself doesn't drive a reset pin", not that nothing
-// resets the panel.
-Arduino_DataBus *bus = new Arduino_ESP32QSPI(
-    LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-Arduino_GFX *gfx = new Arduino_SH8601(bus, GFX_NOT_DEFINED /* RST */, 0 /* rotation */,
-                                       false /* IPS */, LCD_WIDTH, LCD_HEIGHT);
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDR, Wire);
 ServoSweep servo(pwm, SERVO_CHANNEL, 5, 175, 90.0f); // degrees/sec sweep speed
 Ultrasonic sonar(ULTRASONIC_TRIG, ULTRASONIC_ECHO, 200.0f); // 200cm max range
-IoExpander expander(Wire, IO_EXPANDER_I2C_ADDR);
+
+// ---- Software framebuffer (RGB565), blitted via LCD_addWindow() ----
+uint16_t *fb = nullptr; // EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT, from Display_SPD2010.h
+
+inline uint16_t color565(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+inline void setPixel(int16_t x, int16_t y, uint16_t c) {
+  if (x < 0 || y < 0 || x >= EXAMPLE_LCD_WIDTH || y >= EXAMPLE_LCD_HEIGHT) return;
+  fb[y * EXAMPLE_LCD_WIDTH + x] = c;
+}
+
+void fillScreen(uint16_t c) {
+  for (int i = 0; i < EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT; i++) fb[i] = c;
+}
+
+void drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t c) {
+  int16_t dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  int16_t dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  int16_t err = dx + dy;
+  while (true) {
+    setPixel(x0, y0, c);
+    if (x0 == x1 && y0 == y1) break;
+    int16_t e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+
+void fillCircle(int16_t cx, int16_t cy, int16_t r, uint16_t c) {
+  for (int16_t y = -r; y <= r; y++)
+    for (int16_t x = -r; x <= r; x++)
+      if (x * x + y * y <= r * r) setPixel(cx + x, cy + y, c);
+}
 
 // ---- Radar display geometry ----
-constexpr int16_t CENTER_X = LCD_WIDTH / 2;
-constexpr int16_t CENTER_Y = LCD_HEIGHT - 20;   // pivot near bottom of screen
-constexpr int16_t MAX_RADIUS = LCD_HEIGHT - 40; // leaves room for pivot + label margin
+constexpr int16_t CENTER_X = EXAMPLE_LCD_WIDTH / 2;
+constexpr int16_t CENTER_Y = EXAMPLE_LCD_HEIGHT - 20;   // pivot near bottom of screen
+constexpr int16_t MAX_RADIUS = EXAMPLE_LCD_HEIGHT - 40; // leaves room for pivot + label margin
 constexpr float MAX_RANGE_CM = 200.0f;
 
-constexpr uint16_t COLOR_BG = 0x0000;      // black
-constexpr uint16_t COLOR_GRID = 0x0320;    // dim green
-constexpr uint16_t COLOR_SWEEP = 0x07E0;   // bright green
-constexpr uint16_t COLOR_BLIP = 0xF800;    // red
+const uint16_t COLOR_BG = color565(0, 0, 0);
+const uint16_t COLOR_GRID = color565(0, 60, 0);
+const uint16_t COLOR_SWEEP = color565(0, 255, 0);
 
 // Ring of recent hits, each fades out over FADE_FRAMES sweeps then is reused.
 struct Blip {
@@ -71,25 +105,23 @@ int16_t polarY(float angleDeg, float radiusPx) {
 }
 
 void drawGrid() {
-  gfx->fillScreen(COLOR_BG);
+  fillScreen(COLOR_BG);
   // Range rings.
   for (int i = 1; i <= 4; i++) {
     int16_t r = MAX_RADIUS * i / 4;
-    // Approximate a semicircle with short line segments (cheap, no
-    // per-pixel arc primitive needed for a static grid).
     int16_t prevX = polarX(0, r), prevY = polarY(0, r);
     for (int a = 5; a <= 180; a += 5) {
       int16_t x = polarX(a, r), y = polarY(a, r);
-      gfx->drawLine(prevX, prevY, x, y, COLOR_GRID);
+      drawLine(prevX, prevY, x, y, COLOR_GRID);
       prevX = x;
       prevY = y;
     }
   }
   // Angle spokes every 30 degrees.
   for (int a = 0; a <= 180; a += 30) {
-    gfx->drawLine(CENTER_X, CENTER_Y, polarX(a, MAX_RADIUS), polarY(a, MAX_RADIUS), COLOR_GRID);
+    drawLine(CENTER_X, CENTER_Y, polarX(a, MAX_RADIUS), polarY(a, MAX_RADIUS), COLOR_GRID);
   }
-  gfx->drawLine(0, CENTER_Y, LCD_WIDTH, CENTER_Y, COLOR_GRID); // baseline
+  drawLine(0, CENTER_Y, EXAMPLE_LCD_WIDTH, CENTER_Y, COLOR_GRID); // baseline
 }
 
 void addBlip(float angleDeg, float rangeCm) {
@@ -108,28 +140,25 @@ void drawFrame(float sweepAngleDeg) {
     int16_t x = polarX(b.angleDeg, radiusPx);
     int16_t y = polarY(b.angleDeg, radiusPx);
     uint8_t brightness = (uint16_t)b.life * 255 / FADE_FRAMES;
-    uint16_t color = gfx->color565(brightness, 0, 0);
-    gfx->fillCircle(x, y, 3, color);
+    fillCircle(x, y, 3, color565(brightness, 0, 0));
     b.life--;
   }
 
   // Sweep line (drawn last so it's on top).
-  gfx->drawLine(CENTER_X, CENTER_Y, polarX(sweepAngleDeg, MAX_RADIUS),
-                polarY(sweepAngleDeg, MAX_RADIUS), COLOR_SWEEP);
+  drawLine(CENTER_X, CENTER_Y, polarX(sweepAngleDeg, MAX_RADIUS),
+            polarY(sweepAngleDeg, MAX_RADIUS), COLOR_SWEEP);
+
+  LCD_addWindow(0, 0, EXAMPLE_LCD_WIDTH - 1, EXAMPLE_LCD_HEIGHT - 1, fb);
 }
 
-// Cheap insurance against a pin accidentally getting set to -1 (or left
-// unset) in a future edit of pins.h - passing -1 to pinMode()/Wire.begin()/
-// the QSPI display driver doesn't fail cleanly, it corrupts GPIO/bus state
-// and crashes with an opaque Guru Meditation StoreProhibited panic. Catch
-// it here instead, before anything touches hardware.
+// Cheap insurance against a pin accidentally getting set to -1 in a future
+// edit of pins.h - passing -1 to pinMode()/Wire.begin() doesn't fail
+// cleanly, it corrupts GPIO/bus state and crashes with an opaque Guru
+// Meditation StoreProhibited panic. Catch it here instead, before
+// anything touches hardware.
 void haltIfPinsUnset() {
   struct NamedPin { const char *name; int pin; };
   const NamedPin required[] = {
-      {"LCD_SDIO0", LCD_SDIO0}, {"LCD_SDIO1", LCD_SDIO1},
-      {"LCD_SDIO2", LCD_SDIO2}, {"LCD_SDIO3", LCD_SDIO3},
-      {"LCD_SCLK", LCD_SCLK},   {"LCD_CS", LCD_CS}, {"LCD_BL", LCD_BL},
-      {"PCA9685_SDA", PCA9685_SDA}, {"PCA9685_SCL", PCA9685_SCL},
       {"ULTRASONIC_TRIG", ULTRASONIC_TRIG},
       {"ULTRASONIC_ECHO", ULTRASONIC_ECHO},
   };
@@ -148,48 +177,28 @@ void haltIfPinsUnset() {
   while (true) delay(1000);
 }
 
-// Prints every I2C address that responds on the bus. Run this once to
-// confirm IO_EXPANDER_I2C_ADDR in pins.h (and PCA9685_I2C_ADDR, and the
-// touch controller's address if you care) against what's actually on your
-// board, rather than trusting a guessed default.
-void scanI2CBus() {
-  Serial.println("Scanning I2C bus...");
-  int found = 0;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("  found device at 0x%02X\n", addr);
-      found++;
-    }
-  }
-  if (found == 0) Serial.println("  no I2C devices found - check TOUCH_SDA/TOUCH_SCL wiring/pins");
-}
-
-void resetDisplayAndTouch() {
-  expander.pinModeOutput(LCD_RST_EXIO_PIN);
-  expander.pinModeOutput(TOUCH_RST_EXIO_PIN);
-  expander.pulseResetLow(LCD_RST_EXIO_PIN);
-  expander.pulseResetLow(TOUCH_RST_EXIO_PIN);
-}
-
 void setup() {
   Serial.begin(115200);
   delay(200);
 
   haltIfPinsUnset();
 
-  pinMode(LCD_BL, OUTPUT);
-  digitalWrite(LCD_BL, HIGH); // backlight on
-
-  Wire.begin(PCA9685_SDA, PCA9685_SCL);
-  scanI2CBus();
-  resetDisplayAndTouch();
-
-  if (!gfx->begin()) {
-    Serial.println("Display init failed - check pins.h against Waveshare's demo pin_config.h");
+  fb = (uint16_t *)ps_malloc((size_t)EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT * sizeof(uint16_t));
+  if (!fb) {
+    Serial.println("Framebuffer allocation failed - PSRAM not enabled? "
+                    "Check Tools > PSRAM in the Arduino IDE.");
     while (true) delay(1000);
   }
-  gfx->fillScreen(COLOR_BG);
+
+  // Same bring-up order as Waveshare's own LVGL_Arduino.ino: I2C, then the
+  // IO expander (all EXIO pins as outputs), then backlight, then the LCD
+  // itself (which pulses its reset line through the expander and inits
+  // the touch controller internally).
+  I2C_Init();
+  TCA9554PWR_Init(0x00);
+  Backlight_Init();
+  Set_Backlight(80);
+  LCD_Init();
 
   pwm.begin();
   pwm.setPWMFreq(50); // standard hobby servo rate

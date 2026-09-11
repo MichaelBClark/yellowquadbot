@@ -1,13 +1,16 @@
 # radar
 
-Ultrasonic ping-radar display on a Waveshare ESP32-S3 1.46" round AMOLED
-(412x412), servo-swept HC-SR04, unrelated to the yellowquadbot legs/gait
-code elsewhere in this repo — just sharing the repo for convenience.
+Ultrasonic ping-radar display on a Waveshare ESP32-S3-Touch-LCD-1.46
+(412x412 round display), servo-swept HC-SR04, unrelated to the
+yellowquadbot legs/gait code elsewhere in this repo — just sharing the
+repo for convenience.
 
 ## Hardware
 
-- Waveshare ESP32-S3-Touch-LCD-1.46 (412x412 round display, QSPI; touch
-  isn't used here — docs.waveshare.com/ESP32-S3-Touch-LCD-1.46)
+- Waveshare ESP32-S3-Touch-LCD-1.46 (412x412 round display, QSPI, SPD2010
+  controller; touch isn't used here —
+  docs.waveshare.com/ESP32-S3-Touch-LCD-1.46,
+  github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46)
 - HC-SR04 ultrasonic distance sensor
 - 1x hobby servo (SG90 or similar) to sweep the sensor
 - PCA9685 16-channel I2C PWM/servo driver (the servo is driven through
@@ -16,48 +19,69 @@ code elsewhere in this repo — just sharing the repo for convenience.
 - External 5V supply for the servo, wired to the PCA9685's V+ rail — don't
   power it from the ESP32-S3 board's 5V/USB pin
 
+## Display driver: why this isn't Arduino_GFX
+
+This board's controller is an **SPD2010**, which the popular `GFX Library
+for Arduino` doesn't support — its QSPI display classes assume an 8-bit
+command width, and SPD2010 needs a 32-bit command width plus a dedicated
+vendor driver through ESP-IDF's `esp_lcd_panel` APIs. Using
+`Arduino_SH8601` against this panel (an earlier iteration of this file)
+compiled and ran without error but produced garbled colored bars — not a
+crash, just wrong output, because the init command sequence didn't match
+the chip.
+
+Rather than write a from-scratch SPD2010 driver, the following files are
+copied verbatim from Waveshare's own working example for this exact board
+(`waveshareteam/ESP32-S3-Touch-LCD-1.46`,
+`example/Arduino-3.1.1/examples/LVGL_Arduino`):
+
+- `I2C_Driver.h`/`.cpp` — I2C bus setup
+- `TCA9554PWR.h`/`.cpp` — the onboard I2C GPIO expander (drives
+  `LCD_RST`/`TP_RST`, which aren't plain ESP32 pins)
+- `Touch_SPD2010.h`/`.cpp` — touch controller driver (same chip as the
+  display; not used by this app, but `LCD_Init()` initializes it as a
+  side effect, so it's included to keep that call working as-is rather
+  than surgically removing it)
+- `esp_lcd_spd2010.h`/`.c` — the actual SPD2010 panel driver
+- `Display_SPD2010.h`/`.cpp` — QSPI bus bring-up + `LCD_Init()`/
+  `LCD_addWindow()`, the two functions `radar.ino` calls
+
+`radar.ino` keeps its own tiny software framebuffer (a
+`LCD_WIDTH * LCD_HEIGHT` array of RGB565 pixels in PSRAM) and draws into
+it with plain Bresenham line / midpoint circle routines, since
+`LCD_addWindow()` only blits a rectangular pixel buffer — there's no
+`drawLine`/`fillCircle` primitive API like `Arduino_GFX` had.
+
 ## Building with the Arduino IDE
 
 This is a standard Arduino sketch — open `radar.ino` (the folder is named
-`radar` to match, as Arduino requires) directly in the Arduino IDE. It'll
-show `pins.h`, `servo_sweep.h`, and `ultrasonic.h` as additional tabs
-alongside `radar.ino`.
+`radar` to match, as Arduino requires) directly in the Arduino IDE. The
+`.h`/`.cpp` files above show up as additional tabs alongside `radar.ino`.
 
 1. **Board support**: `File → Preferences → Additional Boards Manager URLs`,
    add `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
    if not already present, then `Tools → Board → Boards Manager`, search
-   "esp32", install the Espressif package (needs a recent version — this
-   board's SH8601 AMOLED support and the modern `ledc`-free PCA9685 setup
-   assume Arduino-ESP32 core 3.x).
+   "esp32", install the Espressif package (a recent 3.x release).
 2. **Board selection**: `Tools → Board → esp32 → ESP32S3 Dev Module`. Under
    `Tools`, also set: USB CDC On Boot = Enabled (needed for Serial over
-   the native USB port), PSRAM = OPI PSRAM (this board has PSRAM; check
-   Waveshare's product page to confirm the exact PSRAM type/mode).
+   the native USB port), **PSRAM = OPI PSRAM** (required — the
+   framebuffer is allocated in PSRAM via `ps_malloc()` and fails loudly
+   over serial if PSRAM isn't enabled).
 3. **Libraries**: `Sketch → Include Library → Manage Libraries`, install:
-   - **GFX Library for Arduino** (by moononournation) — display driver
    - **Adafruit PWM Servo Driver Library** — PCA9685
-4. Fill in `pins.h` (see below), select the right serial port, and upload.
+   (no display library needed — the SPD2010 driver files above don't
+   depend on one)
+4. Select the right serial port and upload.
 
 ## Before you flash anything
 
-`pins.h` is filled in with GPIO numbers confirmed from Waveshare's own docs
-for this board. `LCD_RST` (and the touch controller's `TP_RST`) are wired
-through an onboard I2C GPIO expander rather than a plain ESP32 pin —
-`io_expander.h` drives it using the standard PCA9554/TCA9554 register
-layout, which is what that whole family of cheap 8-bit I2C GPIO expanders
-uses regardless of exact part number. `IO_EXPANDER_I2C_ADDR` in `pins.h`
-defaults to `0x20` (that family's default address with all address pins
-tied low) — **check this against the boot-time I2C scan** (`radar.ino`
-prints every address it finds on the bus before touching the display) and
-update `pins.h` if your board's expander shows up somewhere else. Getting
-the reset line driven correctly matters: without it the display can come
-up half-initialized, which looks like garbled colored bars rather than a
-clean picture or a clean failure.
-
-The ultrasonic sensor's `TRIG`/`ECHO` pins are set to this board's only
-other exposed digital pins (the UART TXD/RXD header, repurposed as plain
-GPIO since this sketch's serial console runs over native USB, not that
-UART) — see `docs/wiring.md` for the full pinout and reasoning.
+The ultrasonic sensor's `TRIG`/`ECHO` pins (`pins.h`) are set to this
+board's only other exposed digital pins (the UART TXD/RXD header,
+repurposed as plain GPIO since this sketch's serial console runs over
+native USB, not that UART) — see `docs/wiring.md` for the full pinout and
+reasoning. Everything else pin-wise (display, touch, IO expander, I2C) is
+hardcoded correctly in the copied driver files, sourced from Waveshare's
+own working example rather than guessed.
 
 ## How it works
 
@@ -68,7 +92,8 @@ UART) — see `docs/wiring.md` for the full pinout and reasoning.
 - `radar.ino` polls both every loop, plots each hit as a fading red blip at
   (servo angle, distance) in polar coordinates on the top semicircle of
   the screen — the classic "ping radar" look — with a green sweep line
-  following the servo in real time.
+  following the servo in real time, drawn into a software framebuffer and
+  blitted to the panel once per frame via `LCD_addWindow()`.
 
 ## Tuning
 
@@ -81,14 +106,4 @@ UART) — see `docs/wiring.md` for the full pinout and reasoning.
   rather than plotted, so the display doesn't get confusing false-far
   blips.
 - `FADE_FRAMES` — how many frames a blip stays visible before fading out.
-
-## A performance note
-
-Every frame does a full-screen redraw (clear + grid + blips + sweep line)
-over QSPI, which is simple but not the fastest way to drive a 412x412
-panel — expect it to look more like a slow, deliberate radar sweep than a
-smooth 60fps animation. That fits a radar display reasonably well as-is;
-if you want it snappier later, the straightforward next step is switching
-to partial-region redraws (only clear/redraw the sweep line's old and new
-position, plus blips as they're added/faded) instead of clearing the
-whole screen every loop.
+- `Set_Backlight(80)` in `radar.ino`'s `setup()` — 0-100 brightness.
