@@ -1,27 +1,34 @@
 #pragma once
 
-// Display, touch, backlight, and I2C-expander pins/config are now owned by
-// the driver files copied from Waveshare's own working example
-// (waveshareteam/ESP32-S3-Touch-LCD-1.46, example/Arduino-3.1.1/examples/
-// LVGL_Arduino) - see Display_SPD2010.h, I2C_Driver.h, TCA9554PWR.h. This
-// file only covers what's specific to the radar app: the ultrasonic
-// sensor and the PCA9685 servo driver.
+// Board: ELEGOO EL-EB-009 (ESP32-2432S028R, aka "Cheap Yellow Display"/CYD)
+// Display/touch pins are NOT here - TFT_eSPI is configured at the library
+// level via a User_Setup.h you copy into the TFT_eSPI library folder, not
+// per-sketch. See User_Setup.h in this folder and the README for the copy
+// step. This file only covers what's specific to the radar app.
+//
+// Verified against community reference pinout for this exact board
+// (github.com/witnessmenow/ESP32-Cheap-Yellow-Display/blob/main/PINS.md):
+// only IO22 and IO27 are genuinely free GPIO (on the CN1 connector) -
+// everything else is claimed by the display, touch, SD card, speaker, or
+// RGB LED. That's not enough for both an I2C bus (2 pins) and a 2-pin
+// ultrasonic sensor, so this reclaims the onboard RGB LED's pins for the
+// ultrasonic sensor, per that repo's own suggestion for exactly this
+// situation ("if your project requires additional pins... RGB LED might
+// be a good candidate to sacrifice").
 
 // ============================================================================
-// Servo (via PCA9685) + ultrasonic sensor pins.
+// Servo (via PCA9685) - uses the board's only free GPIO pair (CN1 connector).
 // ============================================================================
-
-// PCA9685 shares the I2C bus with the touch controller / IO expander
-// (I2C_SDA_PIN/I2C_SCL_PIN in I2C_Driver.h, GPIO11/GPIO10) - same bus,
-// different address (PCA9685 default 0x40 vs TCA9554's 0x20 vs the touch
-// controller's 0x53), so it doesn't need its own GPIOs.
+#define I2C_SDA_PIN       22
+#define I2C_SCL_PIN       27
 #define PCA9685_I2C_ADDR  0x40   // default PCA9685 address (all A0-A5 jumpers open)
 #define SERVO_CHANNEL     0      // PCA9685 output channel the servo is wired to
 
-// This board only exposes two other digital pins on a header (besides the
-// I2C pair used above): the UART TXD/RXD pair, GPIO43/44. Waveshare's docs
-// note these can be used as plain GPIO instead of UART - which is what we
-// do here, since this sketch's serial console runs over the native USB
-// CDC port (ARDUINO_USB_CDC_ON_BOOT), not this UART.
-#define ULTRASONIC_TRIG   43
-#define ULTRASONIC_ECHO   44   // see docs/wiring.md re: 5V echo signal - needs a voltage divider
+// ============================================================================
+// Ultrasonic sensor - reclaims 2 of the 3 onboard RGB LED pins (Red=IO4,
+// Blue=IO17; Green=IO16 left alone, still usable for a status LED if you
+// want one). The RGB LED is fully disconnected from anything useful once
+// you do this - desolder it or just ignore it.
+// ============================================================================
+#define ULTRASONIC_TRIG   4
+#define ULTRASONIC_ECHO   17   // see docs/wiring.md re: 5V echo signal - needs a voltage divider
